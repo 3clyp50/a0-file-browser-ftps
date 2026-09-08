@@ -6,7 +6,7 @@ Explicit FTPS with certificate-verified TLS on control and data connections.
 
 ## Compatibility
 
-**Preview: requires Agent Zero's new File Browser connection provider interface, version 1 (`helpers.file_connections.API_VERSION`).** This interface is currently under development; existing Agent Zero releases without it are not supported. The Plugin Index submission is a draft until that core interface ships. Installing the plugin alone does not upgrade Agent Zero.
+**Requires Agent Zero v2.12 or later.**
 
 ## Install and configure
 
