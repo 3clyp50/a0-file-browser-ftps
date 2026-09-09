@@ -2,11 +2,12 @@
 import datetime
 import ftplib
 import hashlib
-import io
 import posixpath
 import ssl
 import uuid
 from contextlib import contextmanager
+
+from helpers.file_transfers import TransferWriter
 
 
 class Provider:
@@ -86,18 +87,13 @@ class FTPS:
                 return item
         raise FileNotFoundError(relative)
 
-    def read(self, relative, limit):
+    def read(self, relative, destination, limit):
         info = self.stat(relative)
-        if info["is_dir"] or info["size"] > limit:
+        if info["is_dir"] or (limit is not None and info["size"] > limit):
             raise ValueError("Not a file, or file exceeds the size limit.")
-        result = bytearray()
-        def collect(chunk):
-            result.extend(chunk)
-            if len(result) > limit:
-                raise ValueError("File exceeds the size limit.")
-        self.client.retrbinary("RETR " + self.path(relative), collect)
-        data = bytes(result)
-        return data, hashlib.sha256(data).hexdigest()
+        output = TransferWriter(destination, limit)
+        self.client.retrbinary("RETR " + self.path(relative), output.write)
+        return output.receipt()["sha256"]
 
     def absent(self, relative):
         try:
@@ -106,15 +102,16 @@ class FTPS:
             return
         raise FileExistsError("The destination already exists.")
 
-    def write(self, relative, content, expected=None):
+    def write(self, relative, source, expected=None):
         self.stat(posixpath.dirname(relative))
         if expected is None:
             self.absent(relative)
         temporary = relative + ".a0-" + uuid.uuid4().hex
         try:
-            self.client.storbinary("STOR " + self.path(temporary), io.BytesIO(content))
+            digest = hashlib.sha256()
+            self.client.storbinary("STOR " + self.path(temporary), source, callback=digest.update)
             if expected is not None:
-                if self.read(relative, 1024 * 1024)[1] != expected:
+                if self.read(relative, None, None) != expected:
                     raise ValueError("Remote file changed. Reopen it before saving.")
             else:
                 self.absent(relative)
@@ -125,7 +122,7 @@ class FTPS:
                 self.client.delete(self.path(temporary))
             except ftplib.error_perm:
                 pass
-        return hashlib.sha256(content).hexdigest()
+        return digest.hexdigest()
 
     def mkdir(self, relative):
         self.stat(posixpath.dirname(relative))

@@ -1,4 +1,5 @@
 """Verified TLS control/data channels against a disposable FTP server."""
+import io
 import hashlib
 import socket
 import socketserver
@@ -70,13 +71,28 @@ class TransportTest(unittest.TestCase):
             try:
                 config=Provider().validate(dict(host="localhost",port=server.server_address[1],root="/",username="test",password="test",ca_file=str(cert)))
                 with Provider().open(config,root) as fs:
-                    fs.write("code.py",b"print(1)")
-                    data,revision=fs.read("code.py",1024)
+                    fs.write("code.py", io.BytesIO(b"print(1)"))
+                    output = io.BytesIO()
+                    revision = fs.read("code.py", output, 1024)
+                    data = output.getvalue()
                     self.assertEqual(data,b"print(1)")
-                    fs.write("code.py",b"print(2)",expected=revision)
-                    with self.assertRaises(ValueError): fs.write("code.py",b"stale",expected=revision)
+                    fs.write("code.py", io.BytesIO(b"print(2)"),expected=revision)
+                    with self.assertRaises(ValueError): fs.write("code.py", io.BytesIO(b"stale"),expected=revision)
                     self.assertEqual(content["/code.py"],b"print(2)")
-                    with self.assertRaises(FileExistsError): fs.write("code.py",b"overwrite")
+                    with self.assertRaises(FileExistsError): fs.write("code.py", io.BytesIO(b"overwrite"))
+                    large = b"x" * (2 * 1024 * 1024 + 17)
+                    with tempfile.TemporaryFile() as source:
+                        source.write(large)
+                        source.seek(0)
+                        revision = fs.write("large.txt", source)
+                    output = io.BytesIO()
+                    self.assertEqual(fs.read("large.txt", output, len(large)), revision)
+                    self.assertEqual(output.getvalue(), large)
+                    with self.assertRaises(ValueError):
+                        fs.read("large.txt", io.BytesIO(), len(large) - 1)
+                    fs.write("large.txt", io.BytesIO(b"updated"), expected=revision)
+                    self.assertEqual(content["/large.txt"], b"updated")
+                    fs.remove("large.txt")
                     fs.rename("code.py","renamed.py");fs.remove("renamed.py")
                 self.assertFalse(content)
                 self.assertTrue(protected and all(protected))
